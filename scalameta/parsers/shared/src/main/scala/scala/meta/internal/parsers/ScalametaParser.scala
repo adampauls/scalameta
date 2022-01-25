@@ -5030,7 +5030,7 @@ class ScalametaParser(input: Input)(implicit dialect: Dialect) { parser =>
   private val consumeStat: PartialFunction[Token, Stat] = {
     case KwImport() => importStmt()
     case KwExport() => exportStmt()
-    case KwPackage() if !dialect.allowToplevelTerms => packageOrPackageObjectDef()
+    case KwPackage() => packageOrPackageObjectDef()
     case DefIntro() => nonLocalDefOrDcl(secondaryConstructorAllowed = true)
     case EndMarkerIntro() => endMarker()
     case ExprIntro() => stat(expr(location = NoStat, allowRepeated = true))
@@ -5099,7 +5099,17 @@ class ScalametaParser(input: Input)(implicit dialect: Dialect) { parser =>
     stats.toList
   }
 
-  def topStatSeq(): List[Stat] = statSeq(topStat, errorMsg = "expected class or object definition")
+  /**
+   * The type of statement accepted at the "top-level". Note that if [[Dialect.allowToplevelTerms]]
+   * is true, then this method will accept more kinds of statements than those permitted by [[topStat]].
+   */
+  def topStatSeq(): List[Stat] = {
+    statSeq(
+      if (dialect.allowToplevelTerms) consumeStat else topStat,
+      errorMsg = "expected class or object definition"
+    )
+  }
+
   def topStat: PartialFunction[Token, Stat] = {
     case Ellipsis(_) =>
       ellipsis(1, astInfo[Stat])
@@ -5280,23 +5290,12 @@ class ScalametaParser(input: Input)(implicit dialect: Dialect) { parser =>
   }
 
   def source(): Source = autoPos {
-    if (dialect.allowToplevelTerms) scriptSource()
-    else batchSource()
+    batchSource()
   }
 
   def quasiquoteSource(): Source = entrypointSource()
 
   def entrypointSource(): Source = source()
-
-  def scriptSource(): Source = autoPos {
-    // WONTFIX: https://github.com/scalameta/scalameta/issues/368
-    if (dialect.toplevelSeparator == "") {
-      Source(parser.statSeq(consumeStat))
-    } else {
-      require(dialect.toplevelSeparator == EOL)
-      Source(parser.statSeq(consumeStat))
-    }
-  }
 
   def batchSource(): Source = autoPos {
     def inBracelessPackage(): Boolean = token.is[KwPackage] && !ahead(token.is[KwObject]) && ahead {
